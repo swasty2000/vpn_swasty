@@ -1,5 +1,3 @@
-
-
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -8,10 +6,29 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QFrame,
+    QMessageBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 
 from app.ui.styles import APP_STYLE
+from app.core.vpn_client import VPNManager
+
+
+class VPNWorker(QThread):
+    """Фоновый поток для подключения, чтобы интерфейс не зависал."""
+    connected_signal = Signal(str)
+    error_signal = Signal(str)
+
+    def __init__(self, manager: VPNManager):
+        super().__init__()
+        self.manager = manager
+
+    def run(self):
+        try:
+            new_ip = self.manager.connect()
+            self.connected_signal.emit(new_ip)
+        except Exception as e:
+            self.error_signal.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -24,8 +41,15 @@ class MainWindow(QMainWindow):
 
         self.connected = False
 
-        self.setStyleSheet(APP_STYLE)
+        # Настройки подключения (позже замените IP на адрес вашего VPS)
+        self.server_ip = "127.0.0.1"
+        self.vpn_manager = VPNManager(
+            server_url=f"http://{self.server_ip}:8000",
+            api_token="swasty_secret_key_998877",  # Должен совпадать с API_SECRET_TOKEN в server/.env
+            client_name="swasty_pc",
+        )
 
+        self.setStyleSheet(APP_STYLE)
         self.init_ui()
 
     def init_ui(self):
@@ -122,9 +146,9 @@ class MainWindow(QMainWindow):
         info_title = QLabel("Connection information")
         info_title.setObjectName("sectionTitle")
 
-        self.server_label = QLabel("Server: Not selected")
+        self.server_label = QLabel(f"Server: {self.server_ip}")
         self.ip_label = QLabel("IP address: Not checked")
-        self.protocol_label = QLabel("Protocol: WireGuard")
+        self.protocol_label = QLabel("Protocol: AmneziaWG")
 
         for label in [
             info_title,
@@ -141,19 +165,37 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(content)
 
     def toggle_connection(self):
-        # UI demonstration only.
-        # This does NOT establish a real VPN connection.
         if not self.connected:
-            self.connected = True
-            self.status.setText("Demo mode")
-            self.status_description.setText(
-                "Interface preview — VPN is not connected"
-            )
-            self.connect_button.setText("Disconnect demo")
+            # Блокируем кнопку на время подключения
+            self.connect_button.setEnabled(False)
+            self.connect_button.setText("Connecting...")
+            self.status.setText("Connecting...")
+            self.status_description.setText("Fetching config and starting tunnel...")
+
+            self.worker = VPNWorker(self.vpn_manager)
+            self.worker.connected_signal.connect(self.on_connected)
+            self.worker.error_signal.connect(self.on_connection_error)
+            self.worker.start()
         else:
+            self.vpn_manager.disconnect()
             self.connected = False
             self.status.setText("Disconnected")
-            self.status_description.setText(
-                "Your VPN tunnel is currently inactive"
-            )
+            self.status_description.setText("Your VPN tunnel is currently inactive")
+            self.ip_label.setText("IP address: Not checked")
             self.connect_button.setText("Connect")
+
+    def on_connected(self, new_ip: str):
+        self.connected = True
+        self.connect_button.setEnabled(True)
+        self.status.setText("Connected")
+        self.status_description.setText("Your traffic is encrypted via AmneziaWG")
+        self.ip_label.setText(f"IP address: {new_ip}")
+        self.connect_button.setText("Disconnect")
+
+    def on_connection_error(self, error_message: str):
+        self.connected = False
+        self.connect_button.setEnabled(True)
+        self.status.setText("Disconnected")
+        self.status_description.setText("Connection failed")
+        self.connect_button.setText("Connect")
+        QMessageBox.warning(self, "Connection Error", f"Не удалось подключиться:\n{error_message}")

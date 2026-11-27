@@ -1,0 +1,42 @@
+services:
+  amneziawg:
+    image: ghcr.io/w0rng/amneziawg-easy:latest
+    container_name: amneziawg
+    environment:
+      - WG_HOST=${WG_HOST}
+      - PASSWORD=${PASSWORD}
+      - WG_PORT=${WG_PORT}
+      - WG_DEFAULT_ADDRESS=${WG_DEFAULT_ADDRESS}
+      - WG_DEFAULT_DNS=${WG_DEFAULT_DNS}
+      - AWG_JC=4
+      - AWG_JMIN=40
+      - AWG_JMAX=70
+      - AWG_S1=15
+      - AWG_S2=18
+      - AWG_H1=102030405
+      - AWG_H2=203040506
+      - AWG_H3=304050607
+      - AWG_H4=405060708
+    volumes:
+      - ./wireguard:/etc/wireguard
+    ports:
+      - "${WG_PORT}:51820/udp"
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+
+  backend:
+    build: ./backend
+    container_name: swasty-backend
+    environment:
+      - PASSWORD=${PASSWORD}
+      - API_SECRET_TOKEN=${API_SECRET_TOKEN}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - amneziawg
+    restart: unless-stopped
